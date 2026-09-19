@@ -125,8 +125,8 @@ warrior.addChild(cape);
 
 // Legs
 const legs = new PIXI.Container();
-const legL = new PIXI.Graphics().beginFill(DEEP).drawRoundedRect(-12, 0, 12, 50, 3).endFill();
-const legR = new PIXI.Graphics().beginFill(DEEP).drawRoundedRect(0, 0, 12, 50, 3).endFill();
+const legL = new PIXI.Graphics().beginFill(DEEP).drawRoundedRect(-12, 0, 12, 50, 6).endFill();
+const legR = new PIXI.Graphics().beginFill(DEEP).drawRoundedRect(0, 0, 12, 50, 6).endFill();
 legL.pivot.set(-6, 0); legR.pivot.set(6, 0);
 legL.position.set(-6, -50); legR.position.set(6, -50);
 legs.addChild(legL, legR);
@@ -135,13 +135,13 @@ warrior.addChild(legs);
 // Torso
 const torso = new PIXI.Graphics();
 torso.beginFill(ICE);
-torso.drawRoundedRect(-22, -100, 44, 62, 8);
+torso.drawRoundedRect(-22, -100, 44, 62, 16);
 torso.endFill();
 torso.beginFill(PLATE);
-torso.drawRoundedRect(-5, -100, 10, 62, 3);
+torso.drawRoundedRect(-5, -100, 10, 62, 5);
 torso.endFill();
 torso.lineStyle(2, PLATE, 0.9);
-torso.drawRoundedRect(-22, -100, 44, 62, 8);
+torso.drawRoundedRect(-22, -100, 44, 62, 16);
 warrior.addChild(torso);
 
 // Shoulder plates
@@ -152,14 +152,14 @@ shoulderR.position.set(22, -96);
 warrior.addChild(shoulderL, shoulderR);
 
 // Back arm
-const armBack = new PIXI.Graphics().beginFill(DEEP).drawRoundedRect(-6, 0, 12, 42, 4).endFill();
+const armBack = new PIXI.Graphics().beginFill(DEEP).drawRoundedRect(-6, 0, 12, 42, 6).endFill();
 armBack.position.set(-22, -90);
 warrior.addChild(armBack);
 
 // Front arm + sword (this whole group rotates for aim + attack)
 const armFront = new PIXI.Container();
 armFront.position.set(24, -90);
-const upperArm = new PIXI.Graphics().beginFill(ICE).drawRoundedRect(-6, 0, 12, 28, 4).endFill();
+const upperArm = new PIXI.Graphics().beginFill(ICE).drawRoundedRect(-6, 0, 12, 28, 6).endFill();
 const swordGroup = new PIXI.Container();
 swordGroup.position.set(0, 28);
 const blade = new PIXI.Graphics();
@@ -195,7 +195,7 @@ const eyeL = new PIXI.Graphics().beginFill(0x8ff2ff).drawCircle(-4, -8, 2).endFi
 const eyeR = new PIXI.Graphics().beginFill(0x8ff2ff).drawCircle(4, -8, 2).endFill();
 const helm = new PIXI.Graphics();
 helm.beginFill(DEEP);
-helm.drawRoundedRect(-14, -24, 28, 20, 8);
+helm.drawRoundedRect(-14, -24, 28, 20, 13);
 helm.endFill();
 helm.beginFill(PLATE);
 helm.drawRect(-14, -8, 28, 4);

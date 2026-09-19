@@ -146,11 +146,17 @@ class WarriorScene extends Phaser.Scene {
     const cape = this.add.graphics();
     container.add(cape);
 
-    // Legs
-    const legL = this.add.rectangle(-10, -30, 12, 46, darkPurple).setOrigin(0.5, 1);
-    const legR = this.add.rectangle(8, -30, 12, 46, darkPurple).setOrigin(0.5, 1);
-    const bootL = this.add.rectangle(-10, -1, 16, 10, 0x1c1220).setOrigin(0.5, 1);
-    const bootR = this.add.rectangle(8, -1, 16, 10, 0x1c1220).setOrigin(0.5, 1);
+    // Legs — rounded-capsule silhouettes instead of bare rectangles
+    const makeLimb = (w, h, color, radius) => {
+      const g = this.add.graphics();
+      g.fillStyle(color, 1);
+      g.fillRoundedRect(-w / 2, -h, w, h, radius);
+      return g;
+    };
+    const legL = makeLimb(13, 46, darkPurple, 6.5).setPosition(-10, -30);
+    const legR = makeLimb(13, 46, darkPurple, 6.5).setPosition(8, -30);
+    const bootL = makeLimb(17, 12, 0x1c1220, 6).setPosition(-10, -1);
+    const bootR = makeLimb(17, 12, 0x1c1220, 6).setPosition(8, -1);
     container.add([legL, legR, bootL, bootR]);
 
     // Torso (armor)
@@ -164,8 +170,11 @@ class WarriorScene extends Phaser.Scene {
     torso.setPosition(0, 0);
     container.add(torso);
 
-    // Back arm (behind torso, holds nothing, just swings)
-    const armBack = this.add.rectangle(-18, -84, 10, 40, darkPurple).setOrigin(0.5, 0);
+    // Back arm (behind torso, holds nothing, just swings) — capsule-ish limb
+    const armBack = this.add.graphics();
+    armBack.fillStyle(darkPurple, 1);
+    armBack.fillRoundedRect(-5, 0, 10, 40, 5);
+    armBack.setPosition(-18, -84);
     container.add(armBack);
 
     // Shoulder pads
@@ -186,14 +195,19 @@ class WarriorScene extends Phaser.Scene {
     swordGlow.setPosition(0, -40);
 
     const armFront = this.add.container(18, -84);
-    const upperArm = this.add.rectangle(0, 0, 10, 26, purple).setOrigin(0.5, 0);
+    const upperArm = this.add.graphics();
+    upperArm.fillStyle(purple, 1);
+    upperArm.fillRoundedRect(-5, 0, 10, 26, 5);
     const sword = this.add.container(0, 26, [bladeGfx, swordGlow]);
     armFront.add([upperArm, sword]);
     container.add(armFront);
 
     // Head + helmet with horns
     const head = this.add.container(0, -104);
-    const neck = this.add.rectangle(0, 4, 10, 8, skin);
+    const neck = this.add.graphics();
+    neck.fillStyle(skin, 1);
+    neck.fillRoundedRect(-5, 0, 10, 8, 3);
+    neck.setPosition(0, 4);
     const face = this.add.circle(0, -6, 12, skin);
     const eyeL = this.add.circle(-4, -7, 1.6, 0xff5533);
     const eyeR = this.add.circle(4, -7, 1.6, 0xff5533);
