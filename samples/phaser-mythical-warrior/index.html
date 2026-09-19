@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Mythical Warrior — Phaser.js Sample</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #0a0612; overflow: hidden; height: 100%; }
+  #ui {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    font: 13px/1.5 -apple-system, Segoe UI, sans-serif; color: #e8dcff;
+    background: rgba(20, 10, 35, 0.6); padding: 10px 14px; border-radius: 8px;
+    border: 1px solid rgba(180, 140, 255, 0.35); pointer-events: none;
+  }
+  #ui b { color: #c9a8ff; }
+  canvas { display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div><b>Mythical Warrior</b> — Phaser 3</div>
+  <div>← → move · ↑ jump · SPACE attack</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<script>
+// ---------------------------------------------------------------------------
+// A mythical warrior rendered entirely from vector primitives (no image
+// assets), assembled into a Phaser Container so it can be moved, tweened,
+// and posed like a normal sprite. Ember-spirit theme: horned helm, glowing
+// runic armor, tattered cape, a longsword that trails a faint aura.
+// ---------------------------------------------------------------------------
+
+const WIDTH = 960, HEIGHT = 540;
+const GROUND_Y = HEIGHT - 90;
+
+class WarriorScene extends Phaser.Scene {
+  constructor() { super('warrior'); }
+
+  create() {
+    // --- Backdrop: layered gradient sky + distant ruins silhouette -------
+    this.drawBackdrop();
+
+    // --- Ground -----------------------------------------------------------
+    const ground = this.add.graphics();
+    ground.fillStyle(0x1a1024, 1);
+    ground.fillRect(0, GROUND_Y, WIDTH, HEIGHT - GROUND_Y);
+    ground.fillStyle(0x2a1838, 1);
+    for (let x = 0; x < WIDTH; x += 40) {
+      ground.fillTriangle(x, GROUND_Y, x + 20, GROUND_Y - 6, x + 40, GROUND_Y);
+    }
+
+    // --- Ambient embers -----------------------------------------------------
+    this.emberEmitter = this.add.particles(0, 0, this.makeGlowTexture('ember', 6, 0xff9d4d), {
+      x: { min: 0, max: WIDTH },
+      y: HEIGHT + 10,
+      lifespan: 4000,
+      speedY: { min: -60, max: -20 },
+      speedX: { min: -10, max: 10 },
+      scale: { start: 0.6, end: 0 },
+      alpha: { start: 0.9, end: 0 },
+      frequency: 120,
+    });
+
+    // --- Build the warrior --------------------------------------------------
+    this.warrior = this.buildWarrior(220, GROUND_Y);
+    this.facing = 1;
+
+    // Idle breathing / cape sway tween
+    this.tweens.add({
+      targets: this.warrior.torso,
+      scaleY: 1.03,
+      duration: 900,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+    this.capeTime = 0;
+
+    // Aura glow pulsing on the sword
+    this.tweens.add({
+      targets: this.warrior.swordGlow,
+      alpha: { from: 0.15, to: 0.55 },
+      duration: 1000,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    // --- Input ---------------------------------------------------------------
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    this.isAttacking = false;
+    this.velocityY = 0;
+    this.onGround = true;
+  }
+
+  drawBackdrop() {
+    const g = this.add.graphics();
+    // Night-to-violet gradient sky, drawn as horizontal bands
+    const bands = 40;
+    for (let i = 0; i < bands; i++) {
+      const t = i / bands;
+      const c = Phaser.Display.Color.Interpolate.ColorWithColor(
+        new Phaser.Display.Color(8, 6, 20),
+        new Phaser.Display.Color(60, 24, 80),
+        bands, i
+      );
+      g.fillStyle(Phaser.Display.Color.GetColor(c.r, c.g, c.b), 1);
+      g.fillRect(0, (GROUND_Y / bands) * i, WIDTH, GROUND_Y / bands + 1);
+    }
+    // Moon
+    g.fillStyle(0xffe9c2, 0.9);
+    g.fillCircle(WIDTH - 120, 90, 42);
+    g.fillStyle(0xffe9c2, 0.15);
+    g.fillCircle(WIDTH - 120, 90, 64);
+    // Ruin silhouettes
+    g.fillStyle(0x140a1e, 1);
+    const pillars = [140, 340, 520, 760, 860];
+    pillars.forEach((x, i) => {
+      const h = 90 + (i % 3) * 30;
+      g.fillRect(x, GROUND_Y - h, 22, h);
+      g.fillTriangle(x - 6, GROUND_Y - h, x + 11, GROUND_Y - h - 20, x + 28, GROUND_Y - h);
+    });
+  }
+
+  makeGlowTexture(key, radius, color) {
+    const size = radius * 4;
+    const rt = this.textures.createCanvas(key, size, size);
+    const ctx = rt.getContext();
+    const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+    const hex = Phaser.Display.Color.IntegerToColor(color);
+    grad.addColorStop(0, `rgba(${hex.r},${hex.g},${hex.b},1)`);
+    grad.addColorStop(1, `rgba(${hex.r},${hex.g},${hex.b},0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    rt.refresh();
+    return key;
+  }
+
+  // Build the warrior as a Container of Graphics parts so limbs can be
+  // individually posed/tweened (a cheap alternative to a bones rig).
+  buildWarrior(x, groundY) {
+    const container = this.add.container(x, groundY);
+    const purple = 0x6b3fa0, darkPurple = 0x3a2050, gold = 0xf0c869, skin = 0xd9a67c;
+
+    // Cape (behind body) — a wavy polygon redrawn each frame for a cloth feel
+    const cape = this.add.graphics();
+    container.add(cape);
+
+    // Legs
+    const legL = this.add.rectangle(-10, -30, 12, 46, darkPurple).setOrigin(0.5, 1);
+    const legR = this.add.rectangle(8, -30, 12, 46, darkPurple).setOrigin(0.5, 1);
+    const bootL = this.add.rectangle(-10, -1, 16, 10, 0x1c1220).setOrigin(0.5, 1);
+    const bootR = this.add.rectangle(8, -1, 16, 10, 0x1c1220).setOrigin(0.5, 1);
+    container.add([legL, legR, bootL, bootR]);
+
+    // Torso (armor)
+    const torso = this.add.graphics();
+    torso.fillStyle(purple, 1);
+    torso.fillRoundedRect(-20, -92, 40, 62, 6);
+    torso.fillStyle(gold, 1);
+    torso.fillRect(-4, -92, 8, 62); // chest rune stripe
+    torso.lineStyle(2, gold, 0.9);
+    torso.strokeRoundedRect(-20, -92, 40, 62, 6);
+    torso.setPosition(0, 0);
+    container.add(torso);
+
+    // Back arm (behind torso, holds nothing, just swings)
+    const armBack = this.add.rectangle(-18, -84, 10, 40, darkPurple).setOrigin(0.5, 0);
+    container.add(armBack);
+
+    // Shoulder pads
+    const shoulderL = this.add.circle(-20, -88, 10, gold).setStrokeStyle(2, 0x8a6a20);
+    const shoulderR = this.add.circle(20, -88, 10, gold).setStrokeStyle(2, 0x8a6a20);
+    container.add([shoulderL, shoulderR]);
+
+    // Front arm + sword group (pivots for the attack swing)
+    const swordGlow = this.add.circle(0, -34, 5, 0xff8a4d, 0.3);
+    const bladeGfx = this.add.graphics();
+    bladeGfx.fillStyle(0xd8e6ff, 1);
+    bladeGfx.fillTriangle(0, 0, -4, -6, 4, -6);
+    bladeGfx.fillRect(-4, -70, 8, 64);
+    bladeGfx.fillStyle(gold, 1);
+    bladeGfx.fillRect(-10, -8, 20, 8); // crossguard
+    bladeGfx.fillStyle(0x2a1a10, 1);
+    bladeGfx.fillRect(-3, 0, 6, 16); // hilt
+    swordGlow.setPosition(0, -40);
+
+    const armFront = this.add.container(18, -84);
+    const upperArm = this.add.rectangle(0, 0, 10, 26, purple).setOrigin(0.5, 0);
+    const sword = this.add.container(0, 26, [bladeGfx, swordGlow]);
+    armFront.add([upperArm, sword]);
+    container.add(armFront);
+
+    // Head + helmet with horns
+    const head = this.add.container(0, -104);
+    const neck = this.add.rectangle(0, 4, 10, 8, skin);
+    const face = this.add.circle(0, -6, 12, skin);
+    const eyeL = this.add.circle(-4, -7, 1.6, 0xff5533);
+    const eyeR = this.add.circle(4, -7, 1.6, 0xff5533);
+    const helm = this.add.graphics();
+    helm.fillStyle(darkPurple, 1);
+    helm.fillRoundedRect(-13, -22, 26, 18, { tl: 10, tr: 10, bl: 2, br: 2 });
+    helm.fillStyle(gold, 1);
+    helm.fillRect(-13, -8, 26, 4);
+    // horns
+    helm.fillStyle(0xe8e2d0, 1);
+    helm.fillTriangle(-12, -18, -22, -34, -8, -14);
+    helm.fillTriangle(12, -18, 22, -34, 8, -14);
+    head.add([neck, face, eyeL, eyeR, helm]);
+    container.add(head);
+
+    // subtle eye glow
+    const eyeGlow = this.add.circle(0, -110, 9, 0xff5533, 0.25);
+    container.add(eyeGlow);
+
+    container.setDepth(5);
+    return {
+      root: container, torso, cape, legL, legR, armBack, armFront, sword,
+      head, swordGlow, eyeGlow, upperArm,
+    };
+  }
+
+  update(time, delta) {
+    const w = this.warrior;
+    const speed = 220;
+    let moving = false;
+
+    if (!this.isAttacking) {
+      if (this.cursors.left.isDown) {
+        w.root.x -= speed * (delta / 1000);
+        this.facing = -1;
+        moving = true;
+      } else if (this.cursors.right.isDown) {
+        w.root.x += speed * (delta / 1000);
+        this.facing = 1;
+        moving = true;
+      }
+    }
+    w.root.x = Phaser.Math.Clamp(w.root.x, 60, WIDTH - 60);
+    w.root.scaleX = this.facing;
+
+    // Jump (simple parabola)
+    if (this.cursors.up.isDown && this.onGround) {
+      this.velocityY = -420;
+      this.onGround = false;
+    }
+    if (!this.onGround) {
+      this.velocityY += 1000 * (delta / 1000);
+      w.root.y += this.velocityY * (delta / 1000);
+      if (w.root.y >= GROUND_Y) {
+        w.root.y = GROUND_Y;
+        this.velocityY = 0;
+        this.onGround = true;
+      }
+    }
+
+    // Walk cycle: bob legs/torso with a sine wave while moving
+    this.walkTime = (this.walkTime || 0) + (moving ? delta : 0);
+    const bob = moving ? Math.sin(this.walkTime * 0.02) * 4 : 0;
+    w.legL.rotation = moving ? Math.sin(this.walkTime * 0.02) * 0.5 : 0;
+    w.legR.rotation = moving ? -Math.sin(this.walkTime * 0.02) * 0.5 : 0;
+    w.torso.y = -Math.abs(bob) * 0.3;
+    w.head.y = -104 - Math.abs(bob) * 0.3;
+
+    // Cape sway — redraw a soft cloth silhouette based on motion + time
+    this.capeTime += delta * 0.004;
+    const sway = Math.sin(this.capeTime) * 8 + (moving ? -this.facing * 6 : 0);
+    w.cape.clear();
+    w.cape.fillStyle(0x2a1840, 1);
+    w.cape.beginPath();
+    w.cape.moveTo(-16, -88);
+    w.cape.lineTo(16, -88);
+    w.cape.lineTo(20 + sway * 0.4, -20 + Math.abs(sway) * 0.5);
+    w.cape.lineTo(0 + sway, -4);
+    w.cape.lineTo(-20 + sway * 0.6, -20 - Math.abs(sway) * 0.3);
+    w.cape.closePath();
+    w.cape.fillPath();
+
+    // Attack: sword swing arc triggered by SPACE
+    if (Phaser.Input.Keyboard.JustDown(this.spaceKey) && !this.isAttacking) {
+      this.isAttacking = true;
+      w.armFront.rotation = -1.6;
+      this.tweens.add({
+        targets: w.armFront,
+        rotation: 1.4,
+        duration: 220,
+        ease: 'Cubic.easeOut',
+        onComplete: () => {
+          this.tweens.add({
+            targets: w.armFront,
+            rotation: 0,
+            duration: 180,
+            delay: 60,
+            ease: 'Sine.easeInOut',
+            onComplete: () => { this.isAttacking = false; },
+          });
+        },
+      });
+      // brief flash on the blade glow
+      w.swordGlow.setAlpha(1);
+      this.tweens.add({ targets: w.swordGlow, alpha: 0.3, duration: 300 });
+    }
+
+    // Eye glow flicker
+    w.eyeGlow.alpha = 0.2 + Math.abs(Math.sin(time * 0.003)) * 0.25;
+  }
+}
+
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: WIDTH,
+  height: HEIGHT,
+  backgroundColor: '#0a0612',
+  parent: document.body,
+  physics: { default: 'arcade' },
+  scene: WarriorScene,
+});
+</script>
+</body>
+</html>

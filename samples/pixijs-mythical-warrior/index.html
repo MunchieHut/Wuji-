@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Mythical Warrior — PixiJS Sample</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #050308; overflow: hidden; height: 100%; }
+  #ui {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    font: 13px/1.5 -apple-system, Segoe UI, sans-serif; color: #dcefff;
+    background: rgba(8, 14, 28, 0.6); padding: 10px 14px; border-radius: 8px;
+    border: 1px solid rgba(110, 190, 255, 0.35); pointer-events: none;
+  }
+  #ui b { color: #8fd3ff; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div><b>Mythical Warrior</b> — PixiJS</div>
+  <div>Move mouse to aim · Click to swing sword</div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
+<script>
+// ---------------------------------------------------------------------------
+// A frost-warrior built purely from PIXI.Graphics primitives inside nested
+// Containers (torso -> arms/head as children), so it can be posed the way a
+// simple 2D rig would be. Idle animation = breathing + cape wave + eye glow.
+// Mouse aim rotates the upper body toward the pointer; click swings the sword.
+// ---------------------------------------------------------------------------
+
+const app = new PIXI.Application({
+  width: window.innerWidth,
+  height: window.innerHeight,
+  backgroundColor: 0x050308,
+  antialias: true,
+  resolution: Math.min(window.devicePixelRatio || 1, 2),
+  autoDensity: true,
+});
+document.body.appendChild(app.view);
+
+window.addEventListener('resize', () => {
+  app.renderer.resize(window.innerWidth, window.innerHeight);
+  layoutScene();
+});
+
+// --- Background: icy gradient + aurora streaks + snow particles ------------
+const bg = new PIXI.Graphics();
+app.stage.addChild(bg);
+
+function drawBackground() {
+  bg.clear();
+  const w = app.renderer.width / app.renderer.resolution;
+  const h = app.renderer.height / app.renderer.resolution;
+  const bands = 30;
+  for (let i = 0; i < bands; i++) {
+    const t = i / bands;
+    const r = Math.round(4 + t * 20);
+    const g = Math.round(10 + t * 30);
+    const b = Math.round(28 + t * 50);
+    bg.beginFill((r << 16) + (g << 8) + b, 1);
+    bg.drawRect(0, (h / bands) * i, w, h / bands + 1);
+    bg.endFill();
+  }
+  // ground
+  bg.beginFill(0x0a1420, 1);
+  bg.drawRect(0, h - 100, w, 100);
+  bg.endFill();
+  bg.beginFill(0x142234, 1);
+  for (let x = 0; x < w; x += 50) {
+    bg.drawPolygon([x, h - 100, x + 25, h - 112, x + 50, h - 100]);
+  }
+  bg.endFill();
+}
+
+// Aurora streaks (soft translucent bands)
+const aurora = new PIXI.Graphics();
+app.stage.addChild(aurora);
+
+// Snow particles
+const snow = [];
+const snowContainer = new PIXI.Container();
+app.stage.addChild(snowContainer);
+function makeSnow() {
+  snowContainer.removeChildren();
+  snow.length = 0;
+  const w = app.renderer.width / app.renderer.resolution;
+  const h = app.renderer.height / app.renderer.resolution;
+  for (let i = 0; i < 90; i++) {
+    const g = new PIXI.Graphics();
+    const r = 1 + Math.random() * 2.2;
+    g.beginFill(0xdfefff, 0.8);
+    g.drawCircle(0, 0, r);
+    g.endFill();
+    g.x = Math.random() * w;
+    g.y = Math.random() * h;
+    g.vy = 20 + Math.random() * 40;
+    g.vx = -10 + Math.random() * 20;
+    snowContainer.addChild(g);
+    snow.push(g);
+  }
+}
+
+// --- Build the warrior --------------------------------------------------
+function glowTexture(color, radius = 40) {
+  const g = new PIXI.Graphics();
+  const steps = 10;
+  for (let i = steps; i > 0; i--) {
+    const a = (1 - i / steps) * 0.5;
+    g.beginFill(color, a);
+    g.drawCircle(0, 0, (radius / steps) * i);
+    g.endFill();
+  }
+  return app.renderer.generateTexture(g);
+}
+
+const ICE = 0x2f6fb0, DEEP = 0x18314f, PLATE = 0xbcdcf5, SKIN = 0xd7b79a, GLOW = 0x7fdcff;
+
+const warrior = new PIXI.Container();
+app.stage.addChild(warrior);
+
+// Cape — drawn dynamically each frame
+const cape = new PIXI.Graphics();
+warrior.addChild(cape);
+
+// Legs
+const legs = new PIXI.Container();
+const legL = new PIXI.Graphics().beginFill(DEEP).drawRoundedRect(-12, 0, 12, 50, 3).endFill();
+const legR = new PIXI.Graphics().beginFill(DEEP).drawRoundedRect(0, 0, 12, 50, 3).endFill();
+legL.pivot.set(-6, 0); legR.pivot.set(6, 0);
+legL.position.set(-6, -50); legR.position.set(6, -50);
+legs.addChild(legL, legR);
+warrior.addChild(legs);
+
+// Torso
+const torso = new PIXI.Graphics();
+torso.beginFill(ICE);
+torso.drawRoundedRect(-22, -100, 44, 62, 8);
+torso.endFill();
+torso.beginFill(PLATE);
+torso.drawRoundedRect(-5, -100, 10, 62, 3);
+torso.endFill();
+torso.lineStyle(2, PLATE, 0.9);
+torso.drawRoundedRect(-22, -100, 44, 62, 8);
+warrior.addChild(torso);
+
+// Shoulder plates
+const shoulderL = new PIXI.Graphics().beginFill(PLATE).drawCircle(0, 0, 11).endFill();
+shoulderL.position.set(-22, -96);
+const shoulderR = new PIXI.Graphics().beginFill(PLATE).drawCircle(0, 0, 11).endFill();
+shoulderR.position.set(22, -96);
+warrior.addChild(shoulderL, shoulderR);
+
+// Back arm
+const armBack = new PIXI.Graphics().beginFill(DEEP).drawRoundedRect(-6, 0, 12, 42, 4).endFill();
+armBack.position.set(-22, -90);
+warrior.addChild(armBack);
+
+// Front arm + sword (this whole group rotates for aim + attack)
+const armFront = new PIXI.Container();
+armFront.position.set(24, -90);
+const upperArm = new PIXI.Graphics().beginFill(ICE).drawRoundedRect(-6, 0, 12, 28, 4).endFill();
+const swordGroup = new PIXI.Container();
+swordGroup.position.set(0, 28);
+const blade = new PIXI.Graphics();
+blade.beginFill(0xeaf6ff);
+blade.drawPolygon([0, -70, -5, -6, 5, -6]);
+blade.drawRect(-5, -70, 10, 66);
+blade.endFill();
+blade.beginFill(PLATE);
+blade.drawRect(-12, -6, 24, 8);
+blade.endFill();
+blade.beginFill(0x2a2016);
+blade.drawRect(-3, 2, 6, 16);
+blade.endFill();
+const swordGlowTex = glowTexture(GLOW, 60);
+const swordGlow = new PIXI.Sprite(swordGlowTex);
+swordGlow.anchor.set(0.5);
+swordGlow.position.set(0, -40);
+swordGlow.alpha = 0.35;
+swordGroup.addChild(swordGlow, blade);
+armFront.addChild(upperArm, swordGroup);
+warrior.addChild(armFront);
+
+// Head
+const head = new PIXI.Container();
+head.position.set(0, -112);
+const face = new PIXI.Graphics().beginFill(SKIN).drawCircle(0, -6, 13).endFill();
+const eyeGlowTex = glowTexture(0x66e0ff, 26);
+const eyeGlow = new PIXI.Sprite(eyeGlowTex);
+eyeGlow.anchor.set(0.5);
+eyeGlow.position.set(0, -8);
+eyeGlow.scale.set(0.6);
+const eyeL = new PIXI.Graphics().beginFill(0x8ff2ff).drawCircle(-4, -8, 2).endFill();
+const eyeR = new PIXI.Graphics().beginFill(0x8ff2ff).drawCircle(4, -8, 2).endFill();
+const helm = new PIXI.Graphics();
+helm.beginFill(DEEP);
+helm.drawRoundedRect(-14, -24, 28, 20, 8);
+helm.endFill();
+helm.beginFill(PLATE);
+helm.drawRect(-14, -8, 28, 4);
+helm.endFill();
+// crown spikes (mythical touch)
+helm.beginFill(0xdfeeff);
+helm.drawPolygon([-13, -18, -20, -36, -6, -16]);
+helm.drawPolygon([0, -22, 0, -42, 7, -20]);
+helm.drawPolygon([13, -18, 20, -36, 6, -16]);
+helm.endFill();
+head.addChild(face, eyeGlow, eyeL, eyeR, helm);
+warrior.addChild(head);
+
+function layoutScene() {
+  const w = app.renderer.width / app.renderer.resolution;
+  const h = app.renderer.height / app.renderer.resolution;
+  warrior.position.set(w / 2, h - 100);
+  drawBackground();
+  makeSnow();
+  drawAurora(w, h);
+}
+
+function drawAurora(w, h) {
+  aurora.clear();
+  const colors = [0x66e0ff, 0x9a7bff, 0x5fffc4];
+  colors.forEach((c, i) => {
+    aurora.beginFill(c, 0.06);
+    const y = 40 + i * 30;
+    aurora.moveTo(0, y);
+    aurora.bezierCurveTo(w * 0.25, y - 40, w * 0.5, y + 50, w, y - 10);
+    aurora.lineTo(w, y + 60);
+    aurora.bezierCurveTo(w * 0.5, y + 110, w * 0.25, y + 20, 0, y + 70);
+    aurora.closePath();
+    aurora.endFill();
+  });
+}
+
+layoutScene();
+
+// --- Interaction: aim with mouse, click to attack ---------------------------
+let target = { x: warrior.x + 200, y: warrior.y - 100 };
+app.stage.eventMode = 'static';
+app.stage.hitArea = app.screen;
+app.stage.on('pointermove', (e) => {
+  target = e.global;
+});
+
+let isAttacking = false;
+app.stage.on('pointerdown', () => {
+  if (isAttacking) return;
+  isAttacking = true;
+  const start = armFront.rotation;
+  const swingTo = start - 1.9;
+  const dur1 = 160, dur2 = 200;
+  let t = 0;
+  swordGlow.alpha = 1;
+  const swing = (delta) => {
+    t += delta;
+    const p = Math.min(t / dur1, 1);
+    armFront.rotation = lerp(start, swingTo, p);
+    if (p >= 1) {
+      app.ticker.remove(swing);
+      let t2 = 0;
+      const recover = (d2) => {
+        t2 += d2;
+        const p2 = Math.min(t2 / dur2, 1);
+        armFront.rotation = lerp(swingTo, start, p2);
+        if (p2 >= 1) { app.ticker.remove(recover); isAttacking = false; }
+      };
+      app.ticker.add(recover);
+    }
+  };
+  app.ticker.add(swing);
+});
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// --- Main animation loop ---------------------------------------------------
+let capeTime = 0;
+app.ticker.add((delta) => {
+  const dt = delta / 60;
+
+  // Snow drift
+  const h = app.renderer.height / app.renderer.resolution;
+  const w = app.renderer.width / app.renderer.resolution;
+  for (const s of snow) {
+    s.y += s.vy * dt;
+    s.x += s.vx * dt;
+    if (s.y > h) { s.y = -5; s.x = Math.random() * w; }
+    if (s.x > w) s.x = 0;
+    if (s.x < 0) s.x = w;
+  }
+
+  // Idle breathing
+  const breathe = 1 + Math.sin(app.ticker.lastTime * 0.0025) * 0.02;
+  torso.scale.set(1, breathe);
+  shoulderL.y = -96 * breathe;
+  shoulderR.y = -96 * breathe;
+
+  // Cape sway
+  capeTime += dt * 1.6;
+  const sway = Math.sin(capeTime) * 10;
+  cape.clear();
+  cape.beginFill(0x11253c, 1);
+  cape.moveTo(-18, -96);
+  cape.lineTo(18, -96);
+  cape.lineTo(24 + sway * 0.5, -20 + Math.abs(sway) * 0.6);
+  cape.lineTo(0 + sway, 0);
+  cape.lineTo(-24 + sway * 0.6, -20 - Math.abs(sway) * 0.3);
+  cape.closePath();
+  cape.endFill();
+
+  // Aim: rotate torso/head slightly toward pointer (not during attack)
+  if (!isAttacking) {
+    const dx = target.x - warrior.x;
+    const dy = target.y - (warrior.y - 90);
+    const facing = dx < 0 ? -1 : 1;
+    warrior.scale.x = facing;
+    const angle = Math.atan2(dy, Math.abs(dx)) * 0.4;
+    head.rotation = angle * 0.6;
+    armFront.rotation = angle * 0.5;
+  }
+
+  // Eye glow flicker
+  eyeGlow.alpha = 0.5 + Math.abs(Math.sin(app.ticker.lastTime * 0.004)) * 0.4;
+  swordGlow.alpha = Math.max(0.25, swordGlow.alpha * 0.98);
+});
+</script>
+</body>
+</html>

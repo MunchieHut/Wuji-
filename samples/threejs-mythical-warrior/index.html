@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Mythical Warrior — Three.js Sample</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #030308; overflow: hidden; height: 100%; }
+  #ui {
+    position: fixed; top: 12px; left: 12px; z-index: 10;
+    font: 13px/1.5 -apple-system, Segoe UI, sans-serif; color: #ffe9d6;
+    background: rgba(20, 10, 5, 0.55); padding: 10px 14px; border-radius: 8px;
+    border: 1px solid rgba(255, 160, 90, 0.35); pointer-events: none;
+  }
+  #ui b { color: #ffb060; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div><b>Mythical Warrior</b> — Three.js</div>
+  <div>Drag to orbit · Scroll to zoom · Click warrior to swing sword</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ---------------------------------------------------------------------------
+// A low-poly "molten guardian" mythical warrior assembled entirely from
+// primitive geometries (box/cone/cylinder/sphere) grouped into a skeleton-
+// like hierarchy (torso -> head/arms/legs, arm -> sword), so each part can be
+// individually rotated for idle breathing, walking-in-place, and an attack
+// swing — the same rigging idea a sprite/bone system would use, just in 3D.
+// ---------------------------------------------------------------------------
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05040a);
+scene.fog = new THREE.FogExp2(0x0a0610, 0.035);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(3.2, 2.4, 5.2);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.1, 0);
+controls.enableDamping = true;
+controls.minDistance = 2.5;
+controls.maxDistance = 10;
+controls.maxPolarAngle = Math.PI * 0.52;
+
+// --- Lighting: warm key light (molten glow) + cool rim + ambient -----------
+const ambient = new THREE.AmbientLight(0x2a1a3a, 0.6);
+scene.add(ambient);
+
+const key = new THREE.DirectionalLight(0xffb060, 2.2);
+key.position.set(4, 6, 3);
+key.castShadow = true;
+key.shadow.mapSize.set(1024, 1024);
+key.shadow.camera.left = -5; key.shadow.camera.right = 5;
+key.shadow.camera.top = 5; key.shadow.camera.bottom = -5;
+scene.add(key);
+
+const rim = new THREE.DirectionalLight(0x6f8fff, 0.9);
+rim.position.set(-5, 3, -4);
+scene.add(rim);
+
+const emberLight = new THREE.PointLight(0xff6a2e, 3, 6, 2);
+emberLight.position.set(0, 1.6, 0.6);
+scene.add(emberLight);
+
+// --- Ground: cracked obsidian disc with emissive fissures -------------------
+const groundGeo = new THREE.CylinderGeometry(6, 6, 0.2, 48);
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x0e0a14, roughness: 0.9 });
+const ground = new THREE.Mesh(groundGeo, groundMat);
+ground.position.y = -0.1;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const fissureMat = new THREE.MeshBasicMaterial({ color: 0xff6a2e });
+for (let i = 0; i < 6; i++) {
+  const len = 1.5 + Math.random() * 2.5;
+  const geo = new THREE.BoxGeometry(0.04, 0.01, len);
+  const mesh = new THREE.Mesh(geo, fissureMat);
+  const angle = (i / 6) * Math.PI * 2;
+  mesh.position.set(Math.cos(angle) * 2.2, 0.001, Math.sin(angle) * 2.2);
+  mesh.rotation.y = angle + Math.random() * 0.6;
+  scene.add(mesh);
+}
+
+// --- Materials ----------------------------------------------------------
+const armorMat = new THREE.MeshStandardMaterial({ color: 0x3a2a1a, roughness: 0.55, metalness: 0.6 });
+const plateMat = new THREE.MeshStandardMaterial({ color: 0xd68a3c, roughness: 0.35, metalness: 0.8 });
+const skinMat = new THREE.MeshStandardMaterial({ color: 0xb98a63, roughness: 0.8 });
+const clothMat = new THREE.MeshStandardMaterial({ color: 0x241018, roughness: 0.9, side: THREE.DoubleSide });
+const emberMat = new THREE.MeshStandardMaterial({ color: 0xff6a2e, emissive: 0xff6a2e, emissiveIntensity: 2 });
+const bladeMat = new THREE.MeshStandardMaterial({ color: 0xe8eef5, roughness: 0.2, metalness: 0.9 });
+
+function box(w, h, d, mat, castShadow = true) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.castShadow = castShadow; m.receiveShadow = true;
+  return m;
+}
+
+// --- Build the warrior rig -----------------------------------------------
+const warrior = new THREE.Group();
+scene.add(warrior);
+
+// Hips (root of the leg chain, also parent of torso)
+const hips = new THREE.Group();
+hips.position.y = 0.9;
+warrior.add(hips);
+
+// Legs
+function makeLeg(sideSign) {
+  const leg = new THREE.Group();
+  leg.position.set(sideSign * 0.18, 0, 0);
+  const thigh = box(0.22, 0.5, 0.24, armorMat);
+  thigh.position.y = -0.25;
+  const shin = box(0.18, 0.5, 0.2, armorMat);
+  shin.position.y = -0.75;
+  const boot = box(0.22, 0.14, 0.32, plateMat);
+  boot.position.set(0, -1.02, 0.05);
+  leg.add(thigh, shin, boot);
+  return leg;
+}
+const legL = makeLeg(-1);
+const legR = makeLeg(1);
+hips.add(legL, legR);
+
+// Torso
+const torso = new THREE.Group();
+torso.position.y = 0.15;
+hips.add(torso);
+const chest = box(0.62, 0.7, 0.36, armorMat);
+chest.position.y = 0.35;
+torso.add(chest);
+const chestPlate = box(0.4, 0.5, 0.06, plateMat);
+chestPlate.position.set(0, 0.4, 0.2);
+torso.add(chestPlate);
+const emberCore = new THREE.Mesh(new THREE.SphereGeometry(0.08, 16, 16), emberMat);
+emberCore.position.set(0, 0.4, 0.24);
+torso.add(emberCore);
+const coreLight = new THREE.PointLight(0xff6a2e, 1.5, 2);
+coreLight.position.copy(emberCore.position);
+torso.add(coreLight);
+
+// Cape — a segmented plane so it can wave like cloth
+const capeSegments = 6;
+const capeGeo = new THREE.PlaneGeometry(0.7, 1.1, 1, capeSegments);
+const cape = new THREE.Mesh(capeGeo, clothMat);
+cape.position.set(0, 0.15, -0.22);
+cape.rotation.x = 0.15;
+cape.castShadow = true;
+torso.add(cape);
+const capePositions = capeGeo.attributes.position;
+const capeBase = new Float32Array(capePositions.array);
+
+// Shoulder plates
+const shoulderL = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 12), plateMat);
+shoulderL.position.set(-0.36, 0.62, 0);
+shoulderL.castShadow = true;
+const shoulderR = shoulderL.clone();
+shoulderR.position.x = 0.36;
+torso.add(shoulderL, shoulderR);
+
+// Back arm (static-ish, opposite the sword arm)
+const armBack = new THREE.Group();
+armBack.position.set(-0.36, 0.55, 0);
+const armBackUpper = box(0.16, 0.42, 0.16, armorMat);
+armBackUpper.position.y = -0.21;
+armBack.add(armBackUpper);
+torso.add(armBack);
+
+// Front arm (holds sword) — group pivots at the shoulder for swing animation
+const armFront = new THREE.Group();
+armFront.position.set(0.36, 0.55, 0);
+torso.add(armFront);
+const armFrontUpper = box(0.16, 0.42, 0.16, armorMat);
+armFrontUpper.position.y = -0.21;
+armFront.add(armFrontUpper);
+
+const forearm = new THREE.Group();
+forearm.position.y = -0.42;
+armFront.add(forearm);
+const forearmMesh = box(0.14, 0.36, 0.14, skinMat);
+forearmMesh.position.y = -0.18;
+forearm.add(forearmMesh);
+
+// Sword, held at the hand
+const sword = new THREE.Group();
+sword.position.y = -0.38;
+forearm.add(sword);
+const hilt = box(0.06, 0.18, 0.06, new THREE.MeshStandardMaterial({ color: 0x2a1a10 }));
+hilt.position.y = -0.05;
+const guard = box(0.28, 0.05, 0.05, plateMat);
+guard.position.y = 0.05;
+const bladeMesh = box(0.08, 0.9, 0.03, bladeMat);
+bladeMesh.position.y = 0.55;
+const bladeTip = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.16, 4), bladeMat);
+bladeTip.rotation.y = Math.PI / 4;
+bladeTip.position.y = 1.08;
+sword.add(hilt, guard, bladeMesh, bladeTip);
+const swordGlow = new THREE.PointLight(0xfff2c0, 0, 1.5);
+swordGlow.position.set(0, 0.6, 0);
+sword.add(swordGlow);
+
+// Neck + head
+const neck = box(0.14, 0.1, 0.14, skinMat);
+neck.position.y = 0.74;
+torso.add(neck);
+
+const head = new THREE.Group();
+head.position.y = 0.9;
+torso.add(head);
+const face = new THREE.Mesh(new THREE.SphereGeometry(0.17, 16, 16), skinMat);
+head.add(face);
+const helm = box(0.34, 0.22, 0.32, armorMat);
+helm.position.y = 0.06;
+head.add(helm);
+const visor = box(0.3, 0.06, 0.06, plateMat);
+visor.position.set(0, -0.02, 0.16);
+head.add(visor);
+// Horns (mythical signature)
+function makeHorn(sideSign) {
+  const horn = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.42, 8), plateMat);
+  horn.position.set(sideSign * 0.14, 0.22, -0.02);
+  horn.rotation.z = sideSign * -0.35;
+  horn.rotation.x = -0.25;
+  horn.castShadow = true;
+  return horn;
+}
+head.add(makeHorn(-1), makeHorn(1));
+// Eyes
+const eyeGeo = new THREE.SphereGeometry(0.025, 8, 8);
+const eyeL = new THREE.Mesh(eyeGeo, emberMat);
+eyeL.position.set(-0.06, 0.01, 0.16);
+const eyeR = eyeL.clone();
+eyeR.position.x = 0.06;
+head.add(eyeL, eyeR);
+
+warrior.traverse((obj) => { if (obj.isMesh) { obj.castShadow = true; obj.receiveShadow = true; } });
+
+// --- Ember particles rising around the warrior -------------------------
+const emberCount = 60;
+const emberGeo = new THREE.BufferGeometry();
+const emberPos = new Float32Array(emberCount * 3);
+const emberSpeed = new Float32Array(emberCount);
+for (let i = 0; i < emberCount; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const r = 0.6 + Math.random() * 1.8;
+  emberPos[i * 3] = Math.cos(angle) * r;
+  emberPos[i * 3 + 1] = Math.random() * 2.5;
+  emberPos[i * 3 + 2] = Math.sin(angle) * r;
+  emberSpeed[i] = 0.3 + Math.random() * 0.6;
+}
+emberGeo.setAttribute('position', new THREE.BufferAttribute(emberPos, 3));
+const emberPoints = new THREE.Points(emberGeo, new THREE.PointsMaterial({
+  color: 0xff8a3c, size: 0.05, transparent: true, opacity: 0.85, depthWrite: false,
+}));
+scene.add(emberPoints);
+
+// --- Click-to-attack ------------------------------------------------------
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let isAttacking = false;
+let attackT = 0;
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObject(warrior, true);
+  if (hits.length && !isAttacking) {
+    isAttacking = true;
+    attackT = 0;
+  }
+});
+
+// --- Resize -----------------------------------------------------------
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// --- Animation loop -------------------------------------------------------
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  // Idle breathing (torso scale) + slight hip sway
+  torso.scale.y = 1 + Math.sin(t * 2.2) * 0.015;
+  hips.position.y = 0.9 + Math.sin(t * 2.2) * 0.01;
+  hips.rotation.y = Math.sin(t * 0.6) * 0.08;
+
+  // Walk-in-place leg swing (always animated gently, like idle shifting weight)
+  legL.rotation.x = Math.sin(t * 1.4) * 0.12;
+  legR.rotation.x = -Math.sin(t * 1.4) * 0.12;
+
+  // Cape wave: displace vertices with a traveling sine wave
+  const pos = capeGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const bx = capeBase[i * 3], by = capeBase[i * 3 + 1], bz = capeBase[i * 3 + 2];
+    const rowFactor = (0.55 - by) ; // more movement near the bottom hem
+    const wave = Math.sin(t * 2.5 + by * 4) * 0.06 * rowFactor;
+    pos.setXYZ(i, bx, by, bz + wave);
+  }
+  pos.needsUpdate = true;
+  capeGeo.computeVertexNormals();
+
+  // Eye + core ember pulse
+  const pulse = 0.6 + Math.sin(t * 4) * 0.4;
+  emberMat.emissiveIntensity = 1.4 + pulse * 1.2;
+  coreLight.intensity = 1.0 + pulse * 1.2;
+  emberLight.intensity = 2.4 + Math.sin(t * 3) * 0.6;
+
+  // Rising embers
+  const positions = emberGeo.attributes.position;
+  for (let i = 0; i < emberCount; i++) {
+    let y = positions.getY(i) + emberSpeed[i] * dt;
+    if (y > 2.6) y = 0;
+    positions.setY(i, y);
+  }
+  positions.needsUpdate = true;
+
+  // Attack swing: front arm slashes down-across, sword glows during swing
+  if (isAttacking) {
+    attackT += dt;
+    const dur = 0.42;
+    const p = Math.min(attackT / dur, 1);
+    const swing = Math.sin(p * Math.PI); // eases out at both ends
+    armFront.rotation.x = -1.3 + swing * 1.9;
+    armFront.rotation.z = swing * -0.5;
+    forearm.rotation.x = swing * -0.6;
+    swordGlow.intensity = swing * 3;
+    if (p >= 1) { isAttacking = false; armFront.rotation.set(0, 0, 0); forearm.rotation.set(0, 0, 0); swordGlow.intensity = 0; }
+  } else {
+    // idle sword-arm rest pose with a faint breathing sway
+    armFront.rotation.x = -0.15 + Math.sin(t * 2.2) * 0.03;
+    armBack.rotation.x = 0.1 + Math.sin(t * 2.2 + 1) * 0.03;
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
